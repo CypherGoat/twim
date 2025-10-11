@@ -34,8 +34,5 @@ TA/
         xmr_ta_YYYY-MM-DD.md
 ```
 
-## License
-MIT
-
 ## Author
 CypherGoat
