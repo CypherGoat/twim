@@ -17,9 +17,6 @@ This project generates a technical analysis (TA) snapshot for monero, including 
 - `xmr_comprehensive.png`: Chart with price and indicators
 - `xmr_ta_YYYY-MM-DD.md`: Markdown summary for newsletter
 
-## Requirements
-- Python 3.7+
-- See `requirements.txt` for required packages
 
 ## Folder Structure
 ```
