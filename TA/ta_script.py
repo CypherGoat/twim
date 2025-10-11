@@ -408,7 +408,7 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
 
     # ---------- Write markdown snapshot ----------
     md_lines = []
-    md_lines.append(f"### 📊 Monero (XMR) Technical Overview")
+    md_lines.append(f"### Monero (XMR) Technical Overview")
     md_lines.append(f"**Date:** {date_str}  ")
     md_lines.append(f"**Pair/source:** {pair_hint}  ")
     md_lines.append("")
@@ -421,9 +421,9 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
     md_lines.append("| Indicator | Value | Signal |")
     md_lines.append("|---|---:|---|")
     md_lines.append(f"| RSI (14) | {rsi_val} | {rsi_signal} |")
-    md_lines.append(f"| MACD | {'Bullish' if macd_line>macd_signal else 'Bearish'} | {'✅' if macd_line>macd_signal else '⚠️'} |")
+    md_lines.append(f"| MACD | {'Bullish' if macd_line>macd_signal else 'Bearish'} | {'Strong' if macd_line>macd_signal else 'Caution'} |")
     md_lines.append(f"| 20-EMA vs 50-EMA | {ema20:.2f} vs {ema50:.2f} | {ema_trend} |")
-    md_lines.append(f"| Bollinger Bands | Price {bb_pos} | {'⚠️' if 'upper' in bb_pos or 'lower' in bb_pos else '✅'} |")
+    md_lines.append(f"| Bollinger Bands | Price {bb_pos} | {'Caution' if 'upper' in bb_pos or 'lower' in bb_pos else 'Stable'} |")
     md_lines.append("")
     md_lines.append(f"![](./xmr_comprehensive.png)")
     md_lines.append("")
