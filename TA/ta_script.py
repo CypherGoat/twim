@@ -247,7 +247,7 @@ def fetch_ohlcv_coingecko(coin_id='monero', vs_currency='usd', days=180):
             
         # CoinGecko returns [timestamp_ms, open, high, low, close]
         df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms').dt.tz_localize('UTC')  # Ensure timezone aware
         df.set_index('timestamp', inplace=True)
         
         # If we got more data than requested, trim to the requested timeframe
@@ -260,10 +260,20 @@ def fetch_ohlcv_coingecko(coin_id='monero', vs_currency='usd', days=180):
         print("CoinGecko fetch failed:", e)
         return None
 
-
+def fetch_latest_price_coingecko(coin_id='monero'):
+    try:
+        import requests
+        url = f'https://api.coingecko.com/api/v3/coins/{coin_id}'
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        return data['market_data']['current_price']['usd']
+    except Exception as e:
+        print(f"Failed to fetch latest price: {e}")
+        return None
 
 # ---------- Main ----------
-def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days=365):
+def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days=180):
     # Prepare output folder for today's run (ISO date)
     run_date = datetime.now(timezone.utc).date().isoformat()  # e.g. 2025-10-11
     out_dir = os.path.join(base_out_dir, run_date)
@@ -276,6 +286,12 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
 
     # Ensure numeric columns  
     df = df.astype({'close': float, 'open': float, 'high': float, 'low': float})
+
+    latest_price = fetch_latest_price_coingecko(coin_id='monero')
+    if latest_price:
+        # Update the latest price in the DataFrame
+        df.loc[datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0), 'close'] = latest_price
+        print(f"Updated latest price to: ${latest_price}")
     
     # Add volume data from CoinGecko markets endpoint if not available
     if 'volume' not in df.columns:
@@ -305,7 +321,7 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
             
             if volume_data:
                 volume_df = pd.DataFrame(volume_data, columns=['timestamp', 'volume'])
-                volume_df['timestamp'] = pd.to_datetime(volume_df['timestamp'], unit='ms')
+                volume_df['timestamp'] = pd.to_datetime(volume_df['timestamp'], unit='ms').dt.tz_localize('UTC')  # Ensure timezone aware
                 volume_df.set_index('timestamp', inplace=True)
                 
                 # Align volume data with OHLC timeframe
@@ -315,8 +331,8 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
                 # Resample to match OHLC frequency and merge
                 if len(df) > 0 and len(volume_df) > 0:
                     # Determine frequency based on data points
-                    time_diff = (df.index[-1] - df.index[0]).days if len(df) > 1 else 1
-                    if time_diff / len(df) < 1:  # Sub-daily data
+                    time_diff = (df.index[-1] - df.index[0]).total_seconds() / (24 * 3600)  # Convert to days
+                    if time_diff < 1:  # Sub-daily data
                         freq = 'H'  # Hourly
                     else:
                         freq = 'D'  # Daily
