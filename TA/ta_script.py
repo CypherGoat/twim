@@ -218,13 +218,31 @@ def create_comprehensive_chart(df, date_str, support, resistance, out_dir):
 def fetch_ohlcv_coingecko(coin_id='monero', vs_currency='usd', days=180):
     try:
         import requests
-        # CoinGecko only supports specific day values: 1,7,14,30,90,180,365
-        # Map requested days to supported values
-        if days <= 1:
-            api_days = 1
-        elif days <= 7:
-            api_days = 7
-        elif days <= 14:
+        
+        # First fetch most recent data (with higher granularity)
+        recent_url = f'https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc'
+        recent_params = {'vs_currency': vs_currency, 'days': '7'}  # Always get last 7 days in high resolution
+        recent_response = requests.get(recent_url, params=recent_params, timeout=30)
+        recent_response.raise_for_status()
+        recent_data = recent_response.json()
+        
+        if not recent_data or len(recent_data) == 0:
+            print("CoinGecko returned empty recent data")
+            return None
+        
+        recent_df = pd.DataFrame(recent_data, columns=['timestamp', 'open', 'high', 'low', 'close'])
+        recent_df['timestamp'] = pd.to_datetime(recent_df['timestamp'], unit='ms')
+        recent_df.set_index('timestamp', inplace=True)
+        
+        # If only recent data is needed, return it
+        if days <= 7:
+            if len(recent_df) > days:
+                recent_df = recent_df.tail(days)
+            return recent_df
+            
+        # For longer timeframes, also fetch historical data
+        # Map requested days to supported values, but exclude what we already have
+        if days <= 14:
             api_days = 14
         elif days <= 30:
             api_days = 30
@@ -235,45 +253,40 @@ def fetch_ohlcv_coingecko(coin_id='monero', vs_currency='usd', days=180):
         else:
             api_days = 365
         
-        url = f'https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc'
-        params = {'vs_currency': vs_currency, 'days': str(api_days)}
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+        hist_url = f'https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc'
+        hist_params = {'vs_currency': vs_currency, 'days': str(api_days)}
+        hist_response = requests.get(hist_url, params=hist_params, timeout=30)
+        hist_response.raise_for_status()
+        hist_data = hist_response.json()
         
-        if not data or len(data) == 0:
-            print("CoinGecko returned empty data")
-            return None
+        if not hist_data or len(hist_data) == 0:
+            print("CoinGecko returned empty historical data, using recent data only")
+            return recent_df
             
-        # CoinGecko returns [timestamp_ms, open, high, low, close]
-        df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms').dt.tz_localize('UTC')  # Ensure timezone aware
-        df.set_index('timestamp', inplace=True)
+        hist_df = pd.DataFrame(hist_data, columns=['timestamp', 'open', 'high', 'low', 'close'])
+        hist_df['timestamp'] = pd.to_datetime(hist_df['timestamp'], unit='ms')
+        hist_df.set_index('timestamp', inplace=True)
+        
+        # Combine datasets, with recent data overriding historical data when timestamps overlap
+        combined_df = pd.concat([hist_df, recent_df])
+        combined_df = combined_df[~combined_df.index.duplicated(keep='last')]
+        combined_df = combined_df.sort_index()
         
         # If we got more data than requested, trim to the requested timeframe
-        if len(df) > days and days < api_days:
-            df = df.tail(days)
+        if len(combined_df) > days:
+            combined_df = combined_df.tail(days)
         
-        print(f"Fetched {len(df)} data points from CoinGecko (requested {days} days, API returned {api_days} days)")
-        return df
+        print(f"Fetched {len(combined_df)} data points from CoinGecko (with {len(recent_df)} recent points)")
+        return combined_df
+        
     except Exception as e:
-        print("CoinGecko fetch failed:", e)
+        print(f"CoinGecko fetch failed: {e}")
         return None
 
-def fetch_latest_price_coingecko(coin_id='monero'):
-    try:
-        import requests
-        url = f'https://api.coingecko.com/api/v3/coins/{coin_id}'
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        return data['market_data']['current_price']['usd']
-    except Exception as e:
-        print(f"Failed to fetch latest price: {e}")
-        return None
+
 
 # ---------- Main ----------
-def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days=180):
+def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days=365):
     # Prepare output folder for today's run (ISO date)
     run_date = datetime.now(timezone.utc).date().isoformat()  # e.g. 2025-10-11
     out_dir = os.path.join(base_out_dir, run_date)
@@ -286,12 +299,6 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
 
     # Ensure numeric columns  
     df = df.astype({'close': float, 'open': float, 'high': float, 'low': float})
-
-    latest_price = fetch_latest_price_coingecko(coin_id='monero')
-    if latest_price:
-        # Update the latest price in the DataFrame
-        df.loc[datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0), 'close'] = latest_price
-        print(f"Updated latest price to: ${latest_price}")
     
     # Add volume data from CoinGecko markets endpoint if not available
     if 'volume' not in df.columns:
@@ -321,7 +328,7 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
             
             if volume_data:
                 volume_df = pd.DataFrame(volume_data, columns=['timestamp', 'volume'])
-                volume_df['timestamp'] = pd.to_datetime(volume_df['timestamp'], unit='ms').dt.tz_localize('UTC')  # Ensure timezone aware
+                volume_df['timestamp'] = pd.to_datetime(volume_df['timestamp'], unit='ms')
                 volume_df.set_index('timestamp', inplace=True)
                 
                 # Align volume data with OHLC timeframe
@@ -331,8 +338,8 @@ def make_outputs(base_out_dir='newsletter_assets/ta', pair_hint='XMR/USDT', days
                 # Resample to match OHLC frequency and merge
                 if len(df) > 0 and len(volume_df) > 0:
                     # Determine frequency based on data points
-                    time_diff = (df.index[-1] - df.index[0]).total_seconds() / (24 * 3600)  # Convert to days
-                    if time_diff < 1:  # Sub-daily data
+                    time_diff = (df.index[-1] - df.index[0]).days if len(df) > 1 else 1
+                    if time_diff / len(df) < 1:  # Sub-daily data
                         freq = 'H'  # Hourly
                     else:
                         freq = 'D'  # Daily
